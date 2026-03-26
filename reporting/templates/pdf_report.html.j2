@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RECON-X Security Assessment Report - {{ title }}</title>
+<style>
+/* Minimal template styles - let _PDF_CSS in pdf_report.py handle main styling */
+.page {
+    page-break-after: always;
+    padding: 1in;
+    min-height: 10in;
+}
+
+/* Cover page */
+.cover-page {
+    text-align: center;
+    page-break-after: always;
+}
+
+.cover-meta {
+    margin: 40pt 0;
+    text-align: left;
+    max-width: 400pt;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Cover meta styling */
+.cover-meta table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.cover-meta td {
+    border: 1pt solid #E5E7EB;
+}
+
+.cover-meta .label {
+    font-weight: 600;
+    width: 140pt;
+}
+</style>
+</head>
+<body>
+<div class="page cover-page">
+    <h1 class="cover-title">RECON-X</h1>
+    <h2 class="cover-subtitle">Security Assessment Report</h2>
+
+    <div class="cover-meta">
+        <table>
+            <tr>
+                <td class="label">Report Title:</td>
+                <td>{{ title }}</td>
+            </tr>
+            <tr>
+                <td class="label">Scan Date:</td>
+                <td>{{ scan_date }}</td>
+            </tr>
+            <tr>
+                <td class="label">Targets Scanned:</td>
+                <td>{{ total_targets }}</td>
+            </tr>
+            <tr>
+                <td class="label">Total Findings:</td>
+                <td>{{ total_findings }}</td>
+            </tr>
+            <tr>
+                <td class="label">Risk Level:</td>
+                <td><span class="risk-{{ overall_risk }}">{{ overall_risk }}</span></td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+<div class="page">
+    <h2>Executive Summary</h2>
+
+    <p>This report presents the findings from an automated security reconnaissance scan conducted by RECON-X. The assessment evaluated {{ total_targets }} target(s) and identified {{ total_findings }} security findings across multiple categories.</p>
+
+    <div class="risk-level risk-{{ overall_risk }}">
+        Overall Risk Assessment: {{ overall_risk }}
+    </div>
+
+    <h3>Findings Overview</h3>
+    <table class="stats-table">
+        <thead>
+            <tr>
+                <th>Severity</th>
+                <th>Count</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for severity, count in severity_counts.items() %}
+            <tr>
+                <td class="severity-{{ severity }}">{{ severity }}</td>
+                <td>{{ count }}</td>
+                <td>
+                    {% if severity == "Critical" %}
+                        Immediate attention required - severe security risks
+                    {% elif severity == "High" %}
+                        High priority - significant security concerns
+                    {% elif severity == "Medium" %}
+                        Medium priority - moderate security issues
+                    {% elif severity == "Low" %}
+                        Low priority - minor security improvements
+                    {% else %}
+                        Informational findings
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>Top Critical Findings</h3>
+    {% if top_findings %}
+    <table>
+        <thead>
+            <tr>
+                <th>Priority</th>
+                <th>Severity</th>
+                <th>Title</th>
+                <th>Target</th>
+                <th>Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for finding in top_findings[:10] %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td class="severity-{{ finding.severity }}">{{ finding.severity }}</td>
+                <td>{{ finding.title }}</td>
+                <td>{{ finding.target }}{% if finding.port %}:{{ finding.port }}{% endif %}</td>
+                <td>{{ finding.category }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No critical findings identified.</p>
+    {% endif %}
+</div>
+
+<div class="page">
+    <h2>Detailed Findings</h2>
+
+    {% for finding in all_findings %}
+    <div class="finding">
+        <div class="finding-header">
+            <h4 class="finding-title">{{ finding.title }}</h4>
+            <div class="finding-meta">
+                Severity: <span class="severity-{{ finding.severity }}">{{ finding.severity }}</span> |
+                Target: {{ finding.target }}{% if finding.port %}:{{ finding.port }}{% endif %} |
+                Category: {{ finding.category }}
+                {% if finding.cve_ids %}
+                | CVE: {{ finding.cve_ids|join(', ') }}
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="finding-section">
+            <div class="finding-label">Description</div>
+            <p>{{ finding.description }}</p>
+        </div>
+
+        {% if finding.evidence %}
+        <div class="finding-section">
+            <div class="finding-label">Evidence</div>
+            <pre>{{ finding.evidence }}</pre>
+        </div>
+        {% endif %}
+
+        <div class="finding-section">
+            <div class="finding-label">Remediation</div>
+            <p>{{ finding.remediation }}</p>
+        </div>
+
+        {% if finding.references %}
+        <div class="finding-section">
+            <div class="finding-label">References</div>
+            <ul>
+                {% for ref in finding.references %}
+                <li>{{ ref }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<div class="page">
+    <h2>Target Details</h2>
+
+    {% for target_result in target_results %}
+    <h3>Target: {{ target_result.target.display_name }}</h3>
+
+    {% if target_result.open_ports %}
+    <h4>Open Ports</h4>
+    <table>
+        <thead>
+            <tr>
+                <th>Port</th>
+                <th>Service</th>
+                <th>Version</th>
+                <th>State</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for port in target_result.open_ports %}
+            <tr>
+                <td>{{ port.port_number }}</td>
+                <td>{{ port.service_name or 'unknown' }}</td>
+                <td>{{ port.service_version or 'unknown' }}</td>
+                <td>{{ port.state }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if target_result.findings %}
+    <h4>Findings for this Target</h4>
+    <ul>
+        {% for finding in target_result.findings %}
+        <li class="severity-{{ finding.severity }}">{{ finding.title }} ({{ finding.severity }})</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<div class="page">
+    <h2>Methodology</h2>
+
+    <h3>Scan Profile</h3>
+    <p>The scan was performed using the <strong>{{ profile }}</strong> profile with the following characteristics:</p>
+
+    <ul>
+        {% if profile == "quick" %}
+        <li>Fast scanning with limited port coverage (top 100 ports)</li>
+        <li>Basic service detection</li>
+        <li>Suitable for initial reconnaissance</li>
+        {% elif profile == "normal" %}
+        <li>Balanced scanning with comprehensive port coverage (top 1000 ports)</li>
+        <li>Service version detection and basic NSE scripts</li>
+        <li>Recommended for most security assessments</li>
+        {% elif profile == "full" %}
+        <li>Comprehensive scanning with extensive port coverage (top 5000 ports)</li>
+        <li>Service version detection, NSE scripts, and OS fingerprinting</li>
+        <li>Includes vulnerability scanning where applicable</li>
+        {% endif %}
+    </ul>
+
+    <h3>Tools and Techniques</h3>
+    <ul>
+        <li><strong>Nmap</strong>: Port scanning, service detection, and vulnerability assessment</li>
+        <li><strong>Custom Modules</strong>: Specialized checks for SMB, RDP, VNC, and web services</li>
+        <li><strong>Certificate Analysis</strong>: SSL/TLS certificate validation</li>
+        <li><strong>Content Analysis</strong>: Web application security checks</li>
+    </ul>
+
+    <h3>Limitations</h3>
+    <ul>
+        <li>Scan results are limited to externally accessible services</li>
+        <li>Some vulnerabilities require authenticated access for detection</li>
+        <li>Web application scanning is limited to basic security headers and content analysis</li>
+        <li>Client-side vulnerabilities are not assessed</li>
+    </ul>
+</div>
+
+<div class="page">
+    <h2>Recommendations</h2>
+
+    <h3>Immediate Actions (Critical & High Severity)</h3>
+    <ol>
+        <li>Address all Critical and High severity findings immediately</li>
+        <li>Apply security patches for identified vulnerabilities</li>
+        <li>Review and strengthen authentication mechanisms</li>
+        <li>Disable unnecessary services and ports</li>
+        <li>Implement proper firewall rules</li>
+    </ol>
+
+    <h3>Short-term Improvements (Medium Severity)</h3>
+    <ol>
+        <li>Configure security headers for web applications</li>
+        <li>Implement proper certificate management</li>
+        <li>Review and secure SMB configurations</li>
+        <li>Enable logging and monitoring</li>
+        <li>Conduct regular security assessments</li>
+    </ol>
+
+    <h3>Long-term Security Posture</h3>
+    <ol>
+        <li>Implement a vulnerability management program</li>
+        <li>Establish security baselines and hardening procedures</li>
+        <li>Conduct regular penetration testing</li>
+        <li>Implement security awareness training</li>
+        <li>Maintain up-to-date security policies</li>
+    </ol>
+
+    <h3>Contact Information</h3>
+    <p>For questions about this report or assistance with remediation:</p>
+    <ul>
+        <li>Report Generated: {{ scan_date }}</li>
+        <li>Tool: RECON-X v1.0.0</li>
+        <li>Documentation: https://github.com/recon-x/recon-x</li>
+    </ul>
+</div>
+</body>
+</html></content>
+<parameter name="filePath">/home/kali/project/recon-x/recon-x/reporting/templates/pdf_report.html.j2
