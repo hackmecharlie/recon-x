@@ -1,0 +1,44 @@
+scan:
+  default_profile: normal
+  concurrency: 10
+  timeout: 300
+  retry_count: 2
+
+nmap:
+  path: nmap
+  extra_flags:
+    quick: "-T4 --top-ports 100"
+    normal: "-T3 -sV -sC --top-ports 1000"
+    full: "-T3 -sV -sC -O --top-ports 5000 --script=vuln"
+
+tls:
+  connect_timeout: 10
+  cipher_test_timeout: 30
+
+web:
+  request_timeout: 15
+  user_agent: "Mozilla/5.0 (compatible; RECON-X/1.0; Security Scanner)"
+  follow_redirects: true
+  max_redirects: 5
+
+screenshot:
+  viewport_width: 1280
+  viewport_height: 800
+  page_timeout: 15000
+  full_page: true
+  bypass_ssl: true
+
+cve:
+  nvd_api_key: ""
+  rate_limit_seconds: 1
+  cache_ttl_hours: 24
+
+reporting:
+  output_dir: "./output"
+  pdf_enabled: true
+  html_enabled: true
+  embed_screenshots_in_html: true
+
+logging:
+  level: INFO
+  log_file: "recon-x.log"
