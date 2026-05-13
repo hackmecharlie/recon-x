@@ -17,6 +17,15 @@ import yaml
 from rich.console import Console
 from rich.prompt import Prompt
 
+from core.credentials import (
+    load_smb_credentials,
+    save_smb_credentials,
+    delete_smb_credentials,
+    prompt_smb_credentials,
+    get_smb_credentials,
+    validate_smb_credentials,
+)
+
 app = typer.Typer(
     name="recon-x",
     help="""
@@ -288,9 +297,7 @@ def scan(
             choices=["y", "n"],
             default="n",
         ).lower() == "y":
-            smb_username = Prompt.ask("SMB username")
-            smb_password = Prompt.ask("SMB password", password=True)
-            smb_domain = Prompt.ask("SMB domain", default="")
+            smb_username, smb_password, smb_domain = prompt_smb_credentials(use_stored=True, force_new=False)
 
     if not yes:
         ok = confirm_scan(
@@ -509,6 +516,98 @@ def version() -> None:
     console.print("  [green]•[/] Resume interrupted scans")
     console.print("  [green]•[/] HTML/PDF report generation")
     console.print("  [green]•[/] CVE vulnerability correlation")
+
+
+@app.command()
+def smb_creds(
+    action: str = typer.Argument("manage", help="Action: manage|save|delete|show"),
+) -> None:
+    """
+    Manage stored SMB credentials for authenticated scanning.
+
+    [bold]Actions:[/]
+    • [green]manage[/]    - Interactive credential management (default)
+    • [green]save[/]      - Save new credentials interactively
+    • [green]delete[/]    - Delete stored credentials
+    • [green]show[/]      - Display stored credentials summary
+
+    [bold]Features:[/]
+    • Securely store credentials with file permissions (0600)
+    • Validate credentials before saving
+    • Use stored credentials automatically during scans
+    • Update or reset credentials on demand
+
+    [bold]Examples:[/]
+    [dim]recon-x smb-creds[/]              # Interactive management
+    [dim]recon-x smb-creds save[/]         # Save new credentials
+    [dim]recon-x smb-creds delete[/]       # Delete stored credentials
+    [dim]recon-x smb-creds show[/]         # Display credentials summary
+    """
+    from cli.prompts import print_banner
+    from rich.prompt import Confirm
+    
+    print_banner()
+
+    action = action.lower().strip()
+
+    if action in ["manage", ""]:
+        # Interactive credential management
+        console.print("[bold cyan]SMB Credentials Manager[/]")
+        console.print()
+
+        stored = load_smb_credentials()
+        if stored:
+            console.print("[green]✓[/] Stored credentials found:")
+            console.print(f"  [dim]Username:[/] {stored.get('username', 'N/A')}")
+            console.print(f"  [dim]Domain:[/] {stored.get('domain', 'N/A') or '(none)'}")
+            console.print()
+
+            if Confirm.ask("Update credentials?", default=False):
+                delete_smb_credentials()
+                username, password, domain = prompt_smb_credentials(use_stored=False, force_new=True)
+            else:
+                console.print("[dim]No changes made.[/]")
+        else:
+            console.print("[yellow]No stored credentials found.[/]")
+            if Confirm.ask("Save new credentials?", default=True):
+                username, password, domain = prompt_smb_credentials(use_stored=False, force_new=True)
+
+    elif action == "save":
+        # Save new credentials
+        console.print("[bold cyan]Save SMB Credentials[/]")
+        console.print()
+        username, password, domain = prompt_smb_credentials(use_stored=False, force_new=True)
+
+    elif action == "delete":
+        # Delete stored credentials
+        stored = load_smb_credentials()
+        if stored:
+            if Confirm.ask("Delete stored SMB credentials?", default=False):
+                delete_smb_credentials()
+            else:
+                console.print("[dim]Deletion cancelled.[/]")
+        else:
+            console.print("[yellow]No stored credentials to delete.[/]")
+
+    elif action == "show":
+        # Show credentials summary
+        stored = load_smb_credentials()
+        if stored:
+            console.print("[bold cyan]Stored SMB Credentials[/]")
+            console.print()
+            console.print(f"  [green]Username:[/] {stored.get('username', 'N/A')}")
+            console.print(f"  [green]Domain:[/] {stored.get('domain', 'N/A') or '(none)'}")
+            console.print(f"  [green]Password:[/] [dim](protected)[/]")
+            console.print()
+            console.print("[dim]Credentials are securely stored and will be used for SMB scans.[/]")
+        else:
+            console.print("[yellow]No stored SMB credentials found.[/]")
+            console.print("[dim]Use 'recon-x smb-creds save' to save credentials.[/]")
+
+    else:
+        console.print(f"[red]Unknown action:[/] {action}")
+        console.print("[dim]Use 'recon-x smb-creds --help' for available actions.[/]")
+        raise typer.Exit(1)
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
