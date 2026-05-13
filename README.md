@@ -32,6 +32,7 @@
   - [Windows](#windows)
 - [Your first scan](#-your-first-scan)
 - [All the ways to scan](#-all-the-ways-to-scan)
+- [SMB credentials management](#-smb-credentials-management)
 - [Scan profiles explained](#-scan-profiles-explained)
 - [Supported target formats](#-supported-target-formats)
 - [Understanding your output](#-understanding-your-output)
@@ -273,6 +274,57 @@ If your RECON-X directory is a git clone, you can pull the latest updates automa
 ```bash
 recon-x scan -t 192.168.1.100 --profile normal --auto-update
 ```
+
+---
+
+## 🔑 SMB credentials management
+
+RECON-X can securely store SMB credentials so you don't have to re-enter them on every scan. Credentials are saved to `~/.recon-x/credentials.json` with permissions locked to `0600` (owner read/write only).
+
+### Managing stored credentials
+
+```bash
+# Save or update credentials interactively
+recon-x smb-creds save
+
+# Show stored credentials (password is masked)
+recon-x smb-creds show
+
+# Delete stored credentials
+recon-x smb-creds delete
+
+# Open the interactive credential manager
+recon-x smb-creds
+```
+
+### How it works during a scan
+
+When you run a scan that includes SMB checks, RECON-X will:
+
+1. Check if stored credentials exist
+2. Offer to use them — press Enter to accept or `n` to enter new ones
+3. Optionally save any new credentials you enter for future scans
+
+```bash
+# You'll see this prompt if credentials are stored:
+# Found stored SMB credentials.
+# Use stored credentials? [Y/n]:
+
+recon-x scan -t 192.168.1.0/24 --smb-only
+```
+
+You can always override stored credentials directly on the command line:
+
+```bash
+recon-x scan -t 192.168.1.100 --smb-only --smb-username admin --smb-password secret --smb-domain CORP
+```
+
+### Security notes
+
+- File permissions are set to `0600` — only your account can read it
+- Never commit `~/.recon-x/credentials.json` to version control
+- Run `recon-x smb-creds delete` before sharing the tool or working on a shared machine
+- Fix permissions manually if needed: `chmod 600 ~/.recon-x/credentials.json`
 
 ---
 

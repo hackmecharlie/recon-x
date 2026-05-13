@@ -163,16 +163,21 @@ class SMBScanner:
                 auth_conn.login(self.username, self.password, domain=self.domain or "")
                 info.authenticated = True
                 logger.info("SMB authenticated login successful on %s", self.host)
-                self._enumerate_shares(auth_conn, info)
             except Exception as exc:  # noqa: BLE001
                 info.authenticated = False
-                logger.debug("SMB authenticated login failed on %s: %s", self.host, exc)
-            finally:
-                if auth_conn and not info.authenticated:
+                logger.warning("SMB authenticated login failed on %s: %s", self.host, exc)
+                if auth_conn:
                     try:
                         auth_conn.close()
                     except Exception:  # noqa: BLE001
                         pass
+                    auth_conn = None
+
+            if info.authenticated and auth_conn:
+                try:
+                    self._enumerate_shares(auth_conn, info)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("SMB share enumeration failed on %s: %s", self.host, exc)
 
         # ── Test null session ──────────────────────────────────────────────
         null_conn: Optional[Any] = None
@@ -181,15 +186,19 @@ class SMBScanner:
             null_conn.login("", "")  # null session
             info.null_session = True
             logger.info("SMB null session successful on %s", self.host)
-            self._enumerate_shares(null_conn, info)
         except Exception:  # noqa: BLE001
             info.null_session = False
-        finally:
-            if null_conn:
-                try:
-                    null_conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
+        if info.null_session and null_conn and not info.shares:
+            try:
+                self._enumerate_shares(null_conn, info)
+            except Exception:  # noqa: BLE001
+                pass
+        if null_conn:
+            try:
+                null_conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            null_conn = None
 
         # ── Test guest login ───────────────────────────────────────────────
         guest_conn: Optional[Any] = None
@@ -275,23 +284,39 @@ class SMBScanner:
             conn: Active SMBConnection.
             info: SMBInfo to populate in-place.
         """
+        shares = None
         try:
             shares = conn.listShares()
-            logger.debug("Found %d shares on %s", len(shares) if shares else 0, self.host)
+            logger.debug("listShares() returned %d shares on %s", len(shares) if shares else 0, self.host)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("Failed to list shares on %s: %s", self.host, exc)
-            logger.debug("Attempting alternative share enumeration method...")
+            logger.warning("listShares() failed on %s: %s — trying direct SRVSVC", self.host, exc)
+
+        if not shares:
+            shares = self._list_shares_direct(conn)
+        if not shares:
             return
 
         for share in shares:
-            share_name = share["shi1_netname"][:-1] if share.get("shi1_netname") else "?"
-            share_type = share.get("shi1_type", 0)
-            share_remark = share.get("shi1_remark", "")
-            if hasattr(share_remark, "__class__") and hasattr(share_remark, "decode"):
-                try:
-                    share_remark = share_remark.decode("utf-8", errors="replace")
-                except Exception:  # noqa: BLE001
-                    share_remark = str(share_remark)
+            try:
+                raw = share["shi1_netname"]
+                if isinstance(raw, bytes):
+                    share_name = raw.rstrip(b"\x00").decode("utf-8", errors="replace")
+                else:
+                    share_name = str(raw).rstrip("\x00")
+            except Exception:  # noqa: BLE001
+                share_name = "?"
+            try:
+                share_type = int(share["shi1_type"])
+            except Exception:  # noqa: BLE001
+                share_type = 0
+            try:
+                raw_remark = share["shi1_remark"]
+                if isinstance(raw_remark, bytes):
+                    share_remark = raw_remark.rstrip(b"\x00").decode("utf-8", errors="replace")
+                else:
+                    share_remark = str(raw_remark).rstrip("\x00")
+            except Exception:  # noqa: BLE001
+                share_remark = ""
 
             share_info: Dict[str, Any] = {
                 "name": share_name,
@@ -332,6 +357,39 @@ class SMBScanner:
                 self._test_write_access(conn, share_name, share_info)
 
             info.shares.append(share_info)
+
+    def _list_shares_direct(self, conn: Any) -> Optional[List]:
+        """Enumerate shares via direct DCE/RPC SRVSVC call (fallback for listShares failures).
+
+        Args:
+            conn: Active SMBConnection.
+
+        Returns:
+            List of share info dicts or None if enumeration fails.
+        """
+        try:
+            from impacket.dcerpc.v5 import transport as rpc_transport, srvs
+        except ImportError:
+            return None
+
+        try:
+            rpctransport = rpc_transport.SMBTransport(
+                self.host,
+                self.host,
+                filename=r"\srvsvc",
+                smb_connection=conn,
+            )
+            dce = rpctransport.get_dce_rpc()
+            dce.connect()
+            dce.bind(srvs.MSRPC_UUID_SRVS)
+            resp = srvs.hNetrShareEnum(dce, 1)
+            dce.disconnect()
+            result = resp["InfoStruct"]["ShareInfo"]["Level1"]["Buffer"]
+            logger.debug("Direct SRVSVC returned %d shares on %s", len(result) if result else 0, self.host)
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Direct SRVSVC share enumeration also failed on %s: %s", self.host, exc)
+            return None
 
     def _test_write_access(self, conn: Any, share_name: str, share_info: Dict[str, Any]) -> None:
         """Test if the share is writable by attempting to create a hidden file.
@@ -539,21 +597,31 @@ class SMBScanner:
         if printers:
             logger.info("Found %d printer share(s) on %s", len(printers), self.host)
 
-    def _enumerate_files_recursive(self, conn: Any, share_name: str, info: SMBInfo, depth: int = 0, max_depth: int = 3) -> None:
+    def _enumerate_files_recursive(
+        self,
+        conn: Any,
+        share_name: str,
+        info: SMBInfo,
+        depth: int = 0,
+        max_depth: int = 2,
+        current_path: str = "",
+    ) -> None:
         """Recursively search shares for interesting files.
 
         Args:
             conn: Active SMBConnection.
-            share_name: Share to enumerate.
+            share_name: Share name (e.g. "testshare").
             info: SMBInfo to populate.
             depth: Current recursion depth.
             max_depth: Maximum recursion depth to prevent excessive scanning.
+            current_path: Path within the share being listed (empty = root).
         """
         if depth > max_depth:
             return
 
+        list_pattern = f"{current_path}\\*" if current_path else "*"
         try:
-            files = conn.listPath(share_name, "*")
+            files = conn.listPath(share_name, list_pattern)
         except Exception:  # noqa: BLE001
             return
 
@@ -562,21 +630,20 @@ class SMBScanner:
             if fname in (".", ".."):
                 continue
 
-            # Check for sensitive files
+            file_full_path = f"{current_path}\\{fname}" if current_path else fname
+
             if _SENSITIVE_PATTERNS.search(fname):
-                file_path = f.get_longname() if depth == 0 else f.get_longname()
                 info.files_found.append({
                     "share": share_name,
-                    "path": file_path,
-                    "size": f.get_file_size() if hasattr(f, "get_file_size") else 0,
-                    "created": str(f.CreationTime) if hasattr(f, "CreationTime") else "",
+                    "path": file_full_path,
+                    "size": f.get_fileSize() if hasattr(f, "get_fileSize") else 0,
+                    "created": str(f.get_ctime()) if hasattr(f, "get_ctime") else "",
                 })
 
-            # Recurse into directories (with depth limit)
-            if f.is_directory() and depth < max_depth and fname not in (".", ".."):
+            if f.is_directory() and depth < max_depth:
                 try:
                     self._enumerate_files_recursive(
-                        conn, share_name, info, depth + 1, max_depth
+                        conn, share_name, info, depth + 1, max_depth, file_full_path
                     )
                 except Exception:  # noqa: BLE001
                     pass
