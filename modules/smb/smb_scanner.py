@@ -603,7 +603,7 @@ class SMBScanner:
         share_name: str,
         info: SMBInfo,
         depth: int = 0,
-        max_depth: int = 2,
+        max_depth: int = 3,
         current_path: str = "",
     ) -> None:
         """Recursively search shares for interesting files.
