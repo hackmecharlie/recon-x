@@ -160,7 +160,7 @@ class SMBScanner:
         if self.username and self.password:
             try:
                 auth_conn = SMBConnection(self.host, self.host, sess_port=self.port, timeout=_SMB_TIMEOUT)
-                auth_conn.login(self.username, self.password, self.domain or "", "", "")
+                auth_conn.login(self.username, self.password, domain=self.domain or "")
                 info.authenticated = True
                 logger.info("SMB authenticated login successful on %s", self.host)
                 self._enumerate_shares(auth_conn, info)
@@ -178,7 +178,7 @@ class SMBScanner:
         null_conn: Optional[Any] = None
         try:
             null_conn = SMBConnection(self.host, self.host, sess_port=self.port, timeout=_SMB_TIMEOUT)
-            null_conn.login("", "", "", "", "")  # null session
+            null_conn.login("", "")  # null session
             info.null_session = True
             logger.info("SMB null session successful on %s", self.host)
             self._enumerate_shares(null_conn, info)
@@ -194,15 +194,28 @@ class SMBScanner:
         # ── Test guest login ───────────────────────────────────────────────
         guest_conn: Optional[Any] = None
         if not info.null_session and not info.authenticated:
+            # Try guest login with "guest" username
             try:
                 guest_conn = SMBConnection(self.host, self.host, sess_port=self.port, timeout=_SMB_TIMEOUT)
-                guest_conn.login("guest", "", "", "", "")
+                guest_conn.login("guest", "")
                 info.guest_access = True
                 logger.info("SMB guest access successful on %s", self.host)
                 if not info.shares:
                     self._enumerate_shares(guest_conn, info)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Guest login with 'guest' user failed on %s: %s", self.host, exc)
                 info.guest_access = False
+                # Try anonymous guest access with empty credentials
+                try:
+                    guest_conn = SMBConnection(self.host, self.host, sess_port=self.port, timeout=_SMB_TIMEOUT)
+                    guest_conn.login("", "")
+                    info.guest_access = True
+                    logger.info("SMB guest access (anonymous) successful on %s", self.host)
+                    if not info.shares:
+                        self._enumerate_shares(guest_conn, info)
+                except Exception as exc2:  # noqa: BLE001
+                    logger.debug("Guest login with anonymous credentials failed on %s: %s", self.host, exc2)
+                    info.guest_access = False
             finally:
                 if guest_conn:
                     try:
@@ -264,8 +277,10 @@ class SMBScanner:
         """
         try:
             shares = conn.listShares()
+            logger.debug("Found %d shares on %s", len(shares) if shares else 0, self.host)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Failed to list shares on %s: %s", self.host, exc)
+            logger.debug("Attempting alternative share enumeration method...")
             return
 
         for share in shares:
