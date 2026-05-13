@@ -407,7 +407,7 @@ class SMBScanner:
                         users_found.append({
                             "name": username,
                             "rid": rid,
-                            "enabled": bool(!(user_info["Buffer"]["General"]["UserAccountControl"] & 0x0010)),
+                            "enabled": bool(not (user_info["Buffer"]["General"]["UserAccountControl"] & 0x0010)),
                         })
                     samr.hSamrCloseHandle(dce, user_handle)
                 except Exception:  # noqa: BLE001
